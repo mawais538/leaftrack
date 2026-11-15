@@ -65,3 +65,47 @@ def draw_polygons(
             cv2.putText(out, text, org, font, scale, (0, 0, 0), 3, cv2.LINE_AA)  # outline
             cv2.putText(out, text, org, font, scale, (255, 255, 255), 1, cv2.LINE_AA)
     return out
+
+
+def mask_outline(mask: np.ndarray) -> np.ndarray:
+    """Largest external contour of a boolean mask as an ``(N, 2)`` float array.
+
+    Returns an empty ``(0, 2)`` array for an empty mask.
+    """
+    contours, _ = cv2.findContours(
+        np.asarray(mask, np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE
+    )
+    if not contours:
+        return np.empty((0, 2), float)
+    return max(contours, key=len).reshape(-1, 2).astype(float)
+
+
+def draw_tracks(
+    image: np.ndarray, masks: Sequence[np.ndarray], track_ids: Sequence[int], size: int
+) -> np.ndarray:
+    """Resize ``image`` so its longer side is ``size`` and overlay masks colored by track ID.
+
+    The same track ID always gets the same color (:func:`id_color`), so a
+    leaf keeps its color across the frames of a time-lapse.
+    """
+    scale = size / max(image.shape[:2])
+    dsize = (round(image.shape[1] * scale), round(image.shape[0] * scale))
+    big = cv2.resize(np.asarray(image, np.uint8), dsize, interpolation=cv2.INTER_LINEAR)
+    outlines, ids = [], []
+    for mask, tid in zip(masks, track_ids, strict=True):
+        poly = mask_outline(cv2.resize(np.asarray(mask, np.uint8), dsize) > 0)
+        if len(poly) >= 3:
+            outlines.append(poly)
+            ids.append(int(tid))
+    return draw_polygons(big, outlines, ids, alpha=0.4, thickness=2)
+
+
+def with_caption(image: np.ndarray, text: str, height: int = 28) -> np.ndarray:
+    """Add a white caption bar with dark text above an RGB image."""
+    bar = np.full((height, image.shape[1], 3), 255, np.uint8)
+    scale = height / 50
+    cv2.putText(
+        bar, text, (8, int(height * 0.7)), cv2.FONT_HERSHEY_SIMPLEX, scale, (40, 40, 40), 1,
+        cv2.LINE_AA,
+    )
+    return np.vstack([bar, image])

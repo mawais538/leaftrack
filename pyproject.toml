@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "leaftrack"
-version = "0.2.0"
+version = "0.3.0"
 description = "Leaf instance segmentation, tracking and growth analytics on plant time-lapse images."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -21,11 +21,12 @@ dependencies = [
     "opencv-python-headless>=4.8",
     "pillow>=10.0",
     "pyyaml>=6.0",
+    "scipy>=1.11",
 ]
 
 [project.optional-dependencies]
-train = ["ultralytics>=8.3", "huggingface_hub>=0.24", "truststore>=0.9"]
-analytics = ["pandas>=2.0", "matplotlib>=3.7", "scipy>=1.11"]
+train = ["ultralytics>=8.3", "huggingface_hub>=0.24", "truststore>=0.9", "lap>=0.5.12"]
+analytics = ["pandas>=2.0", "matplotlib>=3.7"]
 demo = ["gradio>=4.0", "fastapi>=0.110", "uvicorn>=0.29", "python-multipart>=0.0.9"]
 dev = ["pytest>=8.0", "ruff>=0.5"]
 

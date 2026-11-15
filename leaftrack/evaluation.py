@@ -17,7 +17,7 @@ from leaftrack.datasets.komatsuna import decode_label
 from leaftrack.datasets.yolo import parse_yolo_line, polygon_to_mask
 from leaftrack.metrics import ImageScore, score_image, summarize
 from leaftrack.segment import LeafInstance, LeafSegmenter, drop_neighbor_leaves
-from leaftrack.viz import draw_polygons
+from leaftrack.viz import draw_polygons, mask_outline
 
 
 def load_split(data_dir: Path, split: str) -> list[dict[str, str]]:
@@ -188,12 +188,6 @@ def ultralytics_val(
     }
 
 
-def _outline(mask: np.ndarray) -> np.ndarray:
-    """Largest external contour of a mask as an ``(N, 2)`` float array."""
-    contours, _ = cv2.findContours(mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-    return max(contours, key=len).reshape(-1, 2).astype(float)
-
-
 def _letterbox(image: np.ndarray, cell: int) -> np.ndarray:
     """Centre an image on a white ``cell`` x ``cell`` square."""
     h, w = image.shape[:2]
@@ -210,8 +204,8 @@ def example_panel(
     scale = cell / max(image.shape[:2])
     size = (round(image.shape[1] * scale), round(image.shape[0] * scale))
     big = cv2.resize(image, size, interpolation=cv2.INTER_LINEAR)
-    pred_polys = [_outline(cv2.resize(p.mask.astype(np.uint8), size) > 0) for p in pred]
-    gt_polys = [_outline(cv2.resize(g.astype(np.uint8), size) > 0) for g in gt]
+    pred_polys = [mask_outline(cv2.resize(p.mask.astype(np.uint8), size) > 0) for p in pred]
+    gt_polys = [mask_outline(cv2.resize(g.astype(np.uint8), size) > 0) for g in gt]
     tiles = [big, draw_polygons(big, pred_polys), draw_polygons(big, gt_polys)]
     gap = np.full((cell, 4, 3), 255, np.uint8)
     boxed = [_letterbox(t, cell) for t in tiles]

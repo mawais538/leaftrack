@@ -31,7 +31,7 @@ tags:
 # LeafTrack: {title}
 
 YOLO11-seg model that segments individual leaves in top-down plant images.
-Trained with [LeafTrack](https://github.com/iamoyes1/leaftrack) on the
+Trained with [LeafTrack](https://github.com/mawais538/leaftrack) on the
 [KOMATSUNA](http://limu.ait.kyushu-u.ac.jp/~agri/komatsuna/) dataset
 (Uchiyama et al., 2017), split by plant so test plants were never seen in training.
 

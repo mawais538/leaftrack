@@ -2,7 +2,7 @@
 
 **Leaf instance segmentation, tracking, and growth analytics for top-down plant time-lapse imagery.**
 
-> Work in progress: segmentation and tracking are trained and evaluated. Growth analytics and the live Hugging Face demo come next.
+> Work in progress: segmentation, tracking and growth analytics are built and evaluated. The live Hugging Face demo comes next.
 
 ![Leaf tracking over 10 days on two held-out test plants](docs/assets/tracking_demo.gif)
 
@@ -23,6 +23,8 @@ configs/          Training configs and the committed plant-level split
 train.py          Training entry point (used by Colab/Kaggle notebooks)
 evaluate.py       Segmentation evaluation and results table
 evaluate_tracking.py  Tracking evaluation, baselines and the demo GIF
+evaluate_growth.py    Growth analytics vs ground truth
+analyze_growth.py     Growth analysis of your own image folder
 api/              FastAPI service
 app.py            Gradio demo (Hugging Face Spaces)
 notebooks/        Thin GPU launcher notebooks
@@ -104,6 +106,53 @@ Reports (`metrics.json`, `results.md`, `per_sequence.csv`), the GIF and this fil
 ```bash
 python evaluate_tracking.py --weights runs/segment/yolo11n/weights/best.pt --device 0
 ```
+
+## Growth analytics
+
+From the tracked leaves LeafTrack measures, per frame and per leaf:
+
+- **Leaf count** and **total projected leaf area** of the plant.
+- **Area of every leaf over time**, in pixels, or in mm² when you give the pixel size.
+- **Relative growth rate (RGR)**, the slope of ln(area) over time per day (0.69/day means the area doubles daily). For the plant it is fitted over a trailing 24 h window, one full day-night cycle, because leaves move during the day and the visible area swings by 15-30% between captures. For each leaf it is fitted over the leaf's first 48 h, its exponential phase, before it levels off.
+- **Absolute growth rate** (area per hour) over the same windows.
+
+Results come as tidy pandas tables (one row per leaf per frame, per frame, per leaf) plus a growth dashboard.
+
+**How accurate is it?** On the test plants, the same analytics computed from the predictions (YOLO11n + ByteTrack) and from the ground-truth label masks agree closely:
+
+| Trait (test split, 240 frames, 28 leaves) | Agreement with ground truth |
+|---|---|
+| Leaf count per frame | exact in 82% of frames, mean error 0.18 leaves |
+| Total leaf area per frame | median error 1.7%, r = 1.000 |
+| Plant RGR (24 h window) | mean error 0.024 per day, r = 0.90 |
+| Area per leaf per frame | median error 2.6% (95% of leaf-frames followed by the leaf's track) |
+| Maximum area per leaf | median error 1.4% |
+| Early RGR per leaf (first 48 h) | mean error 0.14 per day, r = 0.94 |
+
+![Predicted vs ground-truth growth curves for one test plant](docs/assets/growth_vs_ground_truth.png)
+
+*One test plant: predictions (solid) against ground truth (dashed). Each ground-truth leaf and the track that follows it share a color.*
+
+The leaf count is exact slightly less often than in segmentation alone (82% vs 85%) because ByteTrack confirms a new leaf's track one frame after it first appears.
+
+**Analyze your own time-lapse** (a folder of top-down images of one plant, in file-name order). Weights download from the Hub:
+
+```bash
+python analyze_growth.py --images path/to/plant_frames --interval-hours 4
+```
+
+This writes `leaves.csv`, `plant.csv`, `leaf_summary.csv`, `dashboard.png` and `tracking.gif`. Use `--times times.csv` (`filename,hours`) for uneven capture times and `--mm-per-px` for physical units. In Python:
+
+```python
+from leaftrack.pipeline import analyze_sequence
+
+result = analyze_sequence(frames, hours, segmenter)  # frames: RGB arrays, hours: capture times
+result.plant      # leaf_count, total_area_px, rgr_per_day, agr_px_per_h per frame
+result.leaves     # one row per leaf: lifespan, max area, early growth rates
+result.records    # one row per leaf per frame
+```
+
+The accuracy report is reproduced with `python evaluate_growth.py --device 0`.
 
 ## Training
 

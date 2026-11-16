@@ -38,6 +38,11 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("--repo", required=True, help="<user>/<space-name>")
     p.add_argument("--private", action="store_true")
+    p.add_argument(
+        "--hardware",
+        default="zero-a10g",
+        help="ZeroGPU (free for personal accounts, up to 2 Spaces); cpu-basic needs PRO",
+    )
     p.add_argument("--dry-run", action="store_true", help="stage and list files only")
     args = p.parse_args(argv)
 
@@ -54,7 +59,12 @@ def main(argv: list[str] | None = None) -> int:
         use_system_certificates()
         api = HfApi()
         api.create_repo(
-            args.repo, repo_type="space", space_sdk="gradio", private=args.private, exist_ok=True
+            args.repo,
+            repo_type="space",
+            space_sdk="gradio",
+            space_hardware=args.hardware,
+            private=args.private,
+            exist_ok=True,
         )
         api.upload_folder(
             folder_path=tmp,

@@ -5,7 +5,7 @@ colorFrom: green
 colorTo: yellow
 sdk: gradio
 sdk_version: 6.32.0
-python_version: "3.11"
+python_version: "3.12"
 app_file: app.py
 pinned: false
 license: mit
@@ -22,7 +22,8 @@ tags:
 # LeafTrack demo
 
 Segments every leaf in top-down plant images, follows each leaf over a time-lapse with a stable
-ID, and measures growth (leaf count, leaf area, growth rates). YOLO11n-seg + ByteTrack on CPU.
+ID, and measures growth (leaf count, leaf area, growth rates). YOLO11n-seg + ByteTrack, on
+ZeroGPU (the GPU is used only while your request is being analyzed).
 
 Code, evaluation and documentation: [github.com/mawais538/leaftrack](https://github.com/mawais538/leaftrack).
 

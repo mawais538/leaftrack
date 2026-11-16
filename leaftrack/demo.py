@@ -128,17 +128,15 @@ def summarize(analysis: GrowthAnalysis) -> str:
     return "\n".join(lines)
 
 
-def run_timelapse(
+def finish_timelapse(
     frames: Sequence[np.ndarray],
     hours: Sequence[float],
-    segmenter: LeafSegmenter,
-    tracker: str = "bytetrack",
+    analysis: GrowthAnalysis,
     out_dir: Path | None = None,
 ) -> TimelapseResult:
-    """Analyze a sequence and write the GIF and CSV downloads to ``out_dir``."""
+    """Write the GIF and CSV downloads for a finished analysis (CPU only)."""
     out = Path(out_dir or tempfile.mkdtemp(prefix="leaftrack_"))
     out.mkdir(parents=True, exist_ok=True)
-    analysis = analyze_sequence(frames, hours, segmenter, tracker)  # type: ignore[arg-type]
     gif = render_gif(frames, analysis, hours, out / "tracking.gif")
     csvs = []
     for name, df in [
@@ -149,6 +147,18 @@ def run_timelapse(
         df.to_csv(out / name, index=False)
         csvs.append(out / name)
     return TimelapseResult(analysis, gif, csvs, summarize(analysis))
+
+
+def run_timelapse(
+    frames: Sequence[np.ndarray],
+    hours: Sequence[float],
+    segmenter: LeafSegmenter,
+    tracker: str = "bytetrack",
+    out_dir: Path | None = None,
+) -> TimelapseResult:
+    """Analyze a sequence and write the GIF and CSV downloads to ``out_dir``."""
+    analysis = analyze_sequence(frames, hours, segmenter, tracker)  # type: ignore[arg-type]
+    return finish_timelapse(frames, hours, analysis, out_dir)
 
 
 def leaf_table(analysis: GrowthAnalysis) -> pd.DataFrame:

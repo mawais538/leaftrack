@@ -12,6 +12,10 @@ Run locally::
 
 Environment variables: ``LEAFTRACK_WEIGHTS`` (local .pt, otherwise the model is
 downloaded from ``LEAFTRACK_HUB_REPO``), ``LEAFTRACK_CACHE`` (example cache).
+
+On a Hugging Face ZeroGPU Space only segmentation + tracking runs on the GPU
+(``@spaces.GPU``); rendering and tables stay on CPU to save visitors' GPU
+quota. Elsewhere the decorator is a no-op and everything runs on CPU.
 """
 
 from __future__ import annotations
@@ -29,13 +33,27 @@ from leaftrack.demo import (
     EXAMPLES,
     check_sequence,
     fetch_example,
+    finish_timelapse,
     leaf_table,
     load_frames,
     run_single,
-    run_timelapse,
 )
 from leaftrack.hub import use_system_certificates
+from leaftrack.pipeline import analyze_sequence
 from leaftrack.segment import LeafSegmenter
+
+try:  # Hugging Face ZeroGPU; a no-op decorator everywhere else
+    import spaces
+
+    gpu = spaces.GPU
+except ImportError:
+
+    def gpu(fn=None, **_kwargs):
+        return fn if fn is not None else (lambda f: f)
+
+
+ZERO_GPU = os.environ.get("SPACES_ZERO_GPU", "").lower() in {"1", "true"}
+DEVICE = "cuda" if ZERO_GPU else "cpu"
 
 HUB_REPO = os.environ.get("LEAFTRACK_HUB_REPO", "Awais05/leaftrack-yolo11n-seg")
 CONF = 0.30  # selected on the validation plants for YOLO11n
@@ -47,12 +65,31 @@ GITHUB = "https://github.com/mawais538/leaftrack"
 def load_segmenter() -> LeafSegmenter:
     weights = os.environ.get("LEAFTRACK_WEIGHTS")
     if weights:
-        return LeafSegmenter(weights, device="cpu", conf=CONF)
-    use_system_certificates()
-    return LeafSegmenter.from_hub(HUB_REPO, device="cpu", conf=CONF)
+        seg = LeafSegmenter(weights, device=DEVICE, conf=CONF)
+    else:
+        use_system_certificates()
+        seg = LeafSegmenter.from_hub(HUB_REPO, device=DEVICE, conf=CONF)
+    if ZERO_GPU:
+        seg.model.to("cuda")  # ZeroGPU: place the model on CUDA at startup
+    return seg
 
 
 SEGMENTER = load_segmenter()
+
+
+def _gpu_seconds(frames, hours, tracker) -> int:
+    return min(120, 15 + len(frames) // 2)
+
+
+@gpu(duration=_gpu_seconds)
+def track_and_measure(frames, hours, tracker):
+    """The only step that needs the model: segmentation + tracking + analytics."""
+    return analyze_sequence(frames, hours, SEGMENTER, tracker)
+
+
+@gpu(duration=20)
+def segment_image(image):
+    return run_single(image, SEGMENTER)
 
 
 def analyze(example, uploads, interval_hours, tracker_label, progress=gr.Progress()):  # noqa: B008
@@ -74,8 +111,10 @@ def analyze(example, uploads, interval_hours, tracker_label, progress=gr.Progres
 
     frames = load_frames(files)
     hours = [k * interval for k in range(len(frames))]
-    progress(0.1, desc=f"Segmenting and tracking {len(frames)} frames on CPU")
-    result = run_timelapse(frames, hours, SEGMENTER, TRACKERS[tracker_label])
+    progress(0.1, desc=f"Segmenting and tracking {len(frames)} frames")
+    analysis = track_and_measure(frames, hours, TRACKERS[tracker_label])
+    progress(0.9, desc="Rendering")
+    result = finish_timelapse(frames, hours, analysis)
     fig = growth_dashboard(result.analysis.records, result.analysis.plant)
     plt.close(fig)
     return str(result.gif_path), fig, result.summary, leaf_table(result.analysis), [
@@ -87,7 +126,7 @@ def segment_one(image):
     """Gradio callback for the single-image tab."""
     if image is None:
         raise gr.Error("Upload an image first.")
-    overlay, table = run_single(image, SEGMENTER)
+    overlay, table = segment_image(image)
     return overlay, f"**{len(table)} leaves detected.**", table
 
 
@@ -95,8 +134,8 @@ INTRO = f"""
 # LeafTrack: leaf segmentation, tracking and growth analytics
 
 Top-down plant images in; every leaf segmented, followed over time with a stable ID, and
-measured. YOLO11n-seg ([weights](https://huggingface.co/{HUB_REPO})) + ByteTrack, running on
-a free 2-vCPU machine. [Code and results on GitHub]({GITHUB}).
+measured. YOLO11n-seg ([weights](https://huggingface.co/{HUB_REPO})) + ByteTrack, light enough
+for a CPU. [Code and results on GitHub]({GITHUB}).
 """
 
 ABOUT = f"""

@@ -1,7 +1,7 @@
-# Hugging Face Space (free CPU tier). CPU-only PyTorch keeps the image small.
---extra-index-url https://download.pytorch.org/whl/cpu
-torch==2.14.1+cpu
-torchvision==0.29.1+cpu
+# Hugging Face ZeroGPU Space: PyTorch 2.8-2.13 and Python 3.10/3.12 are supported.
+torch==2.13.0
+torchvision==0.28.0
+spaces
 ultralytics==8.4.213
 lap>=0.5.12
 huggingface_hub>=0.24

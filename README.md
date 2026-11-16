@@ -41,24 +41,24 @@ Test split: 240 images of 2 held-out plants (one per capture rig).
 
 | Model | Params | Mask mAP50 | Mask mAP50-95 | SBD ↑ | FBD ↑ | \|DiC\| ↓ | Exact leaf count | CPU latency* |
 |---|---|---|---|---|---|---|---|---|
-| **[YOLO11n-seg](https://huggingface.co/Awais05/leaftrack-yolo11n-seg)** (demo model) | 2.8 M | **0.987** | **0.825** | 0.930 | 0.970 | 0.25 | 82% | **240 ms** |
-| [YOLO11s-seg](https://huggingface.co/Awais05/leaftrack-yolo11s-seg) | 10.1 M | 0.965 | 0.806 | **0.934** | **0.971** | **0.19** | **85%** | 672 ms |
+| **[YOLO11n-seg](https://huggingface.co/Awais05/leaftrack-yolo11n-seg)** (demo model) | 2.8 M | **0.987** | **0.825** | 0.930 | 0.970 | 0.15 | 85% | **241 ms** |
+| [YOLO11s-seg](https://huggingface.co/Awais05/leaftrack-yolo11s-seg) | 10.1 M | 0.965 | 0.806 | **0.934** | **0.971** | **0.15** | **87%** | 523 ms |
 
 \* Median per image at 640 px on 2 CPU threads, matching the free Hugging Face Spaces tier.
 
-- **The nano model is the right choice for the demo.** It matches the small model within 0.004 SBD and is 2.8× faster on CPU.
+- **The nano model is the right choice for the demo.** It matches the small model within 0.004 SBD and is 2.2× faster on CPU.
 - **SBD / FBD / DiC** are the [CVPPP leaf segmentation](https://link.springer.com/article/10.1007/s00138-015-0737-3) metrics. SBD measures how well each leaf is segmented, FBD how well the plant is separated from the background, and |DiC| the error in leaf count.
-- **How the leaf metrics are computed:** at a confidence threshold chosen on the **validation** plants, so the test plants stay unseen, scored against the original color labels.
+- **How the leaf metrics are computed:** with post-processing chosen on the **validation** plants (confidence threshold, and NMS IoU 0.5), so the test plants stay unseen, scored against the original color labels.
 
 ### What made the difference
 
-COCO mAP looked excellent from the start, but leaf counting was off by 1.6 leaves per image. The cause was not the model: multi-view crops contain **leaves of neighbouring plants** at the image edge, which the labels correctly ignore. LeafTrack drops edge leaves that never reach toward the plant centre. On the ground truth this rule removes 0 of 5,820 true leaves.
+COCO mAP looked excellent from the start, but leaf counting was off by 1.4 leaves per image. The cause was not the model: multi-view crops contain **leaves of neighbouring plants** at the image edge, which the labels correctly ignore. LeafTrack drops edge leaves that never reach toward the plant centre. On the ground truth this rule removes 0 of 5,820 true leaves.
 
 | YOLO11n, test split | SBD ↑ | \|DiC\| ↓ | Exact leaf count |
 |---|---|---|---|
-| Ultralytics default (conf 0.25) | 0.738 | 1.60 | 22% |
-| + threshold selected on validation (0.30) | 0.749 | 1.45 | 24% |
-| + neighbour-leaf filter | **0.930** | **0.25** | **82%** |
+| Ultralytics default (conf 0.25) | 0.746 | 1.38 | 26% |
+| + threshold selected on validation (0.30) | 0.756 | 1.27 | 28% |
+| + neighbour-leaf filter | **0.930** | **0.15** | **85%** |
 
 Full reports, including per-rig breakdowns, are written by `evaluate.py` (`metrics.json`, `results.md`, `per_image.csv`).
 
@@ -68,33 +68,34 @@ Full reports, including per-rig breakdowns, are written by `evaluate.py` (`metri
 
 ## Leaf tracking
 
-`LeafTracker` gives every leaf a stable ID across a time-lapse. Frames are 4 hours apart, so there is no smooth motion to model; instead each detection is matched to the existing leaf tracks by **mask overlap** with the Hungarian algorithm. The matching cost combines IoU with overlap of the smaller mask, so a whole leaf wins over a fragment of it when the segmentation flickers. A track survives up to 5 missed frames, so a briefly hidden leaf gets its old ID back. It runs on CPU in about 9 ms per frame, on top of segmentation.
+Every leaf gets a stable ID across the time-lapse. The default tracker is **ByteTrack** (Ultralytics' implementation): it matches boxes with a Kalman filter in two stages, and its second stage uses *low-confidence* detections to continue existing tracks, which keeps a partly covered leaf's ID while its segmentation flickers. On 2 CPU threads it adds about 3 ms per frame to segmentation (237 → 240 ms).
 
 ```python
+from leaftrack.pipeline import track_frames
 from leaftrack.segment import LeafSegmenter
-from leaftrack.track import LeafTracker
 
 segmenter = LeafSegmenter.from_hub("Awais05/leaftrack-yolo11n-seg", conf=0.30)
-tracker = LeafTracker()
-for image in frames:  # time-ordered RGB images of one plant
-    for leaf in tracker.update(segmenter.predict(image)):
+for leaves in track_frames(frames, segmenter):  # time-ordered RGB images of one plant
+    for leaf in leaves:
         print(leaf.track_id, leaf.instance.area)
 ```
 
-Test split: 4 sequences (3 camera views of one plant, one RGB-D plant), 240 frames, 28 leaves. The ground-truth IDs are KOMATSUNA's per-leaf label colors. Tracker settings were selected on the validation plants.
+LeafTrack also includes its own tracker, `LeafTracker` (`track_frames(..., tracker="leaftrack")`). Frames are 4 hours apart, so it skips motion modelling and matches each detection to the existing tracks by **mask overlap** with the Hungarian algorithm. The cost combines IoU with overlap of the smaller mask, so a whole leaf wins over a fragment of it, and a track survives up to 10 missed frames.
+
+Test split: 4 sequences (3 camera views of one plant, one RGB-D plant), 240 frames, 28 leaves. The ground-truth IDs are KOMATSUNA's per-leaf label colors. `LeafTracker` settings were selected on the validation plants.
 
 | Method (YOLO11n masks) | IDF1 ↑ | MOTA ↑ | ID switches ↓ | Mostly tracked ↑ | Val IDF1 |
 |---|---|---|---|---|---|
-| Per-frame IDs (no tracking) | 0.319 | 0.645 | 319 | 4% | — |
-| LeafTrack without track memory | 0.932 | 0.920 | 20 | 93% | — |
-| **LeafTrack** | 0.939 | 0.924 | 16 | 96% | 0.878 |
-| ByteTrack (Ultralytics, box IoU + Kalman filter) | **0.968** | **0.952** | **6** | 96% | **0.886** |
-| LeafTrack on ground-truth masks | 0.973 | 0.988 | 13 | 96% | — |
+| Per-frame IDs (no tracking) | 0.323 | 0.678 | 309 | 4% | — |
+| LeafTracker without track memory | 0.945 | 0.950 | 13 | 93% | — |
+| LeafTracker (mask overlap) | 0.949 | **0.952** | 11 | 96% | 0.886 |
+| **ByteTrack (default)** | **0.968** | **0.952** | **6** | 96% | 0.886 |
+| LeafTracker on ground-truth masks | 0.973 | 0.988 | 13 | 96% | — |
 
 - **IDF1** measures how consistently each leaf keeps one ID over its whole life; **MOTA** combines misses, false detections and ID switches; **mostly tracked** is the share of leaves followed by one ID for at least 80% of their frames.
-- **ByteTrack is the stronger tracker here.** It leads LeafTrack slightly on validation (0.886 vs 0.878) and clearly on test. Its edge comes from using low-confidence boxes to keep tracks alive when a partly covered leaf flickers in the segmentation.
-- **Most LeafTrack errors come from the segmentation, not the matching.** On ground-truth masks it reaches 0.973 IDF1. The remaining switches there happen when a leaf changes shape faster than the 4-hour interval allows to follow, such as an old seed leaf (cotyledon) being covered by new growth.
-- **Approaches that did not help on validation** (and are therefore off by default): a centroid-distance fallback for low-overlap pairs, and a ByteTrack-style second pass over low-confidence detections.
+- **Why ByteTrack is the default:** the two trackers tie on validation (IDF1 0.886). On test, ByteTrack makes about half as many ID switches (6 vs 11) and is easy to swap for any Ultralytics tracker.
+- **Tracking quality is now limited by segmentation.** Given ground-truth masks, `LeafTracker` reaches 0.973 IDF1. The ID switches left there happen when a leaf changes shape faster than a 4-hour interval can follow, such as an old seed leaf (cotyledon) being covered by new growth.
+- **Approaches that did not help on validation:** a centroid-distance fallback for low-overlap pairs, and a ByteTrack-style low-confidence pass inside `LeafTracker`.
 
 ![Tracked leaves at five time points of one test plant](docs/assets/tracking_filmstrip.jpg)
 

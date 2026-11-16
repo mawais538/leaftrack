@@ -134,3 +134,12 @@ def test_growth_metrics_perfect_when_prediction_equals_truth() -> None:
 
     unmatched = growth_metrics([SequenceGrowth("s", gt, pred, {}, HOURS)])
     assert unmatched["leaf"]["area_coverage"] == 0.0
+
+
+def test_plant_window_widens_for_sparse_frames() -> None:
+    daily = [24.0 * k for k in range(5)]
+    sides = [math.sqrt(100 * math.exp(0.4 * h / 24)) for h in daily]
+    frames = [{1: square(round(s) ** 2)} for s in sides]
+    plant = plant_timeseries(records_from_masks(frames, daily))
+    assert plant["rgr_per_day"].iloc[2:].notna().all()
+    assert plant["rgr_per_day"].iloc[-1] == pytest.approx(0.4, abs=0.05)

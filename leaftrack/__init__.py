@@ -16,6 +16,7 @@ Modules:
 - :mod:`leaftrack.tracking_eval` -- tracking evaluation, baselines and rendering.
 - :mod:`leaftrack.analytics`  -- growth tables, growth rates and dashboards.
 - :mod:`leaftrack.growth_eval` -- growth analytics vs ground truth.
+- :mod:`leaftrack.demo`       -- demo logic shared by the Gradio app and the API.
 """
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"

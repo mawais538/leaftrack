@@ -1,0 +1,14 @@
+# Hugging Face Space (free CPU tier). CPU-only PyTorch keeps the image small.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.14.1+cpu
+torchvision==0.29.1+cpu
+ultralytics==8.4.213
+lap>=0.5.12
+huggingface_hub>=0.24
+numpy>=1.24
+opencv-python-headless>=4.8
+pillow>=10.0
+pyyaml>=6.0
+scipy>=1.11
+pandas>=2.0
+matplotlib>=3.7

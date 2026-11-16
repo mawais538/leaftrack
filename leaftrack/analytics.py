@@ -102,7 +102,8 @@ def plant_timeseries(
 
     Columns: ``frame, hours, leaf_count, total_area_px, rgr_per_day,
     agr_px_per_h``. Growth rates are fitted over the trailing ``window_h``
-    hours (inclusive) and are NaN until the window holds 3 frames.
+    hours (inclusive), widened to two capture intervals when frames are
+    sparser than that, and are NaN until the window holds 3 frames.
 
     Args:
         records: output of :func:`leaf_records` / :func:`records_from_masks`.
@@ -123,6 +124,8 @@ def plant_timeseries(
     per_frame = per_frame.reset_index()
     h = per_frame["hours"].to_numpy(float)
     a = per_frame["total_area_px"].to_numpy(float)
+    if len(h) > 1:  # e.g. daily images: a 24 h window would never hold 3 frames
+        window_h = max(window_h, 2 * float(np.median(np.diff(h))))
     rgr, agr = [], []
     for t in range(len(per_frame)):
         win = (h > h[t] - window_h - 1e-9) & (h <= h[t])

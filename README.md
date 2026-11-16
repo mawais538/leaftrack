@@ -2,7 +2,7 @@
 
 **Leaf instance segmentation, tracking, and growth analytics for top-down plant time-lapse imagery.**
 
-> Work in progress: segmentation, tracking and growth analytics are built and evaluated. The live Hugging Face demo comes next.
+> Segmentation, tracking and growth analytics are built and evaluated, with a Gradio demo and a REST API. The hosted demo link is coming soon.
 
 ![Leaf tracking over 10 days on two held-out test plants](docs/assets/tracking_demo.gif)
 
@@ -25,8 +25,9 @@ evaluate.py       Segmentation evaluation and results table
 evaluate_tracking.py  Tracking evaluation, baselines and the demo GIF
 evaluate_growth.py    Growth analytics vs ground truth
 analyze_growth.py     Growth analysis of your own image folder
-api/              FastAPI service
-app.py            Gradio demo (Hugging Face Spaces)
+api/              FastAPI service (segment, analyze)
+app.py            Gradio demo
+deploy/           Hugging Face Space packaging and deploy script
 notebooks/        Thin GPU launcher notebooks
 tests/            pytest suite
 ```
@@ -153,6 +154,33 @@ result.records    # one row per leaf per frame
 ```
 
 The accuracy report is reproduced with `python evaluate_growth.py --device 0`.
+
+## Demo and API
+
+**Gradio demo** (`app.py`): pick an example plant or upload the frames of one plant to get a tracking animation with stable leaf colors, growth charts, a per-leaf table and CSV downloads. A second tab segments and counts the leaves in a single image. It runs on CPU: the 60-frame example plant takes about 6 s on 2 CPU threads, and larger 480 px frames about 0.25 s each.
+
+```bash
+pip install -e ".[demo]"
+python app.py            # http://localhost:7860
+```
+
+The example plants are the KOMATSUNA test and validation plants (never seen in training), **downloaded on demand from the official dataset server**. The dataset page grants no redistribution licence, so no dataset images are stored in this repository or the demo.
+
+**REST API** (`api/main.py`, FastAPI, docs at `/docs`):
+
+```bash
+uvicorn api.main:app --port 8000
+curl -F "image=@plant.png" http://localhost:8000/segment
+curl -F "images=@day1.png" -F "images=@day2.png" -F "interval_hours=24" http://localhost:8000/analyze
+```
+
+| Endpoint | Input | Output |
+|---|---|---|
+| `GET /health` | | status, version, model |
+| `POST /segment` | one image | leaves: polygon, box, area, confidence |
+| `POST /analyze` | frames of one plant (in order), `interval_hours`, `tracker` | leaves per frame with track IDs, plant traits per frame, per-leaf growth summary |
+
+Both load the published model from the Hugging Face Hub (or a local file via `LEAFTRACK_WEIGHTS`). `python deploy/deploy_space.py --repo <user>/leaftrack` publishes the demo as a Hugging Face Space (code only; the model and examples are fetched at runtime).
 
 ## Training
 

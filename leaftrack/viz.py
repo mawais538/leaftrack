@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import colorsys
 from collections.abc import Sequence
+from pathlib import Path
 
 import cv2
 import numpy as np
+from PIL import Image
 
 
 def id_color(index: int) -> tuple[int, int, int]:
@@ -109,3 +111,22 @@ def with_caption(image: np.ndarray, text: str, height: int = 28) -> np.ndarray:
         cv2.LINE_AA,
     )
     return np.vstack([bar, image])
+
+
+def save_gif(frames: Sequence[np.ndarray], path: Path, fps: float = 6, hold_last: int = 6) -> None:
+    """Write RGB frames as a looping GIF with a shared adaptive palette."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    seq = list(frames) + [frames[-1]] * hold_last
+    # Build one palette from frames spread over the sequence, so colors that
+    # only appear late (new leaves, grown leaves) are represented.
+    sample = np.linspace(0, len(frames) - 1, min(8, len(frames))).round().astype(int)
+    montage = Image.fromarray(np.vstack([frames[i] for i in sample]))
+    palette = montage.quantize(colors=255, method=Image.Quantize.MEDIANCUT)
+    images = [
+        Image.fromarray(f).quantize(palette=palette, dither=Image.Dither.NONE) for f in seq
+    ]
+    images[0].save(
+        path, save_all=True, append_images=images[1:], duration=int(1000 / fps), loop=0,
+        optimize=True,
+    )

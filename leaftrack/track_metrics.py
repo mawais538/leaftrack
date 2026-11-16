@@ -122,16 +122,39 @@ def evaluate_sequence(
             pred_len[p] += 1
 
     c.gt_tracks = len(gt_len)
-    if co_occurrence:
-        gts, preds = sorted(gt_len), sorted(pred_len)
-        gi = {g: k for k, g in enumerate(gts)}
-        pi = {p: k for k, p in enumerate(preds)}
-        counts = np.zeros((len(gts), len(preds)))
-        for (g, p), n in co_occurrence.items():
-            counts[gi[g], pi[p]] = n
-        rows, cols = linear_sum_assignment(-counts)
-        c.idtp = int(counts[rows, cols].sum())
-        c.mostly_tracked = sum(
-            1 for r, col in zip(rows, cols, strict=True) if counts[r, col] >= 0.8 * gt_len[gts[r]]
-        )
+    mapping = _best_mapping(co_occurrence)
+    c.idtp = sum(co_occurrence[g, p] for g, p in mapping.items())
+    c.mostly_tracked = sum(
+        1 for g, p in mapping.items() if co_occurrence[g, p] >= 0.8 * gt_len[g]
+    )
     return c
+
+
+def _best_mapping(co_occurrence: dict[tuple[int, int], int]) -> dict[int, int]:
+    """One-to-one gt->pred mapping maximizing frames matched in common (IDF1 mapping)."""
+    if not co_occurrence:
+        return {}
+    gts = sorted({g for g, _ in co_occurrence})
+    preds = sorted({p for _, p in co_occurrence})
+    gi = {g: k for k, g in enumerate(gts)}
+    pi = {p: k for k, p in enumerate(preds)}
+    counts = np.zeros((len(gts), len(preds)))
+    for (g, p), n in co_occurrence.items():
+        counts[gi[g], pi[p]] = n
+    rows, cols = linear_sum_assignment(-counts)
+    return {gts[r]: preds[c] for r, c in zip(rows, cols, strict=True) if counts[r, c] > 0}
+
+
+def trajectory_mapping(
+    gt_frames: Sequence[Frame], pred_frames: Sequence[Frame], iou_threshold: float = 0.5
+) -> dict[int, int]:
+    """Map each ground-truth leaf to the predicted track that follows it longest.
+
+    This is the one-to-one mapping used by IDF1; ground-truth leaves that no
+    track ever overlaps are absent from the result.
+    """
+    co_occurrence: dict[tuple[int, int], int] = defaultdict(int)
+    for gt, pred in zip(gt_frames, pred_frames, strict=True):
+        for g, p in match_frame(gt, pred, iou_threshold):
+            co_occurrence[g, p] += 1
+    return _best_mapping(co_occurrence)

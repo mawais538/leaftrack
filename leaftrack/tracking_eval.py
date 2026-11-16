@@ -27,6 +27,7 @@ from leaftrack.evaluation import load_image
 from leaftrack.segment import LeafInstance, LeafSegmenter
 from leaftrack.track import LeafTracker, TrackedLeaf, track_sequence
 from leaftrack.track_metrics import Frame, TrackingCounts, TrackingSummary, evaluate_sequence
+from leaftrack.viz import save_gif  # noqa: F401  (re-exported for scripts)
 
 Row = dict[str, str]
 Method = Callable[["SequenceRun"], list[Frame]]
@@ -302,22 +303,3 @@ def filmstrip(
     tiles = [_tile(run, tracked[t], t, title, cell) for t in indices]
     gap = np.full((tiles[0].shape[0], 6, 3), 255, np.uint8)
     return np.hstack([x for tile in tiles for x in (tile, gap)][:-1])
-
-
-def save_gif(frames: Sequence[np.ndarray], path: Path, fps: float = 6, hold_last: int = 6) -> None:
-    """Write RGB frames as a looping GIF with a shared adaptive palette."""
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    seq = list(frames) + [frames[-1]] * hold_last
-    # Build one palette from frames spread over the sequence, so colors that
-    # only appear late (new leaves, grown leaves) are represented.
-    sample = np.linspace(0, len(frames) - 1, min(8, len(frames))).round().astype(int)
-    montage = Image.fromarray(np.vstack([frames[i] for i in sample]))
-    palette = montage.quantize(colors=255, method=Image.Quantize.MEDIANCUT)
-    images = [
-        Image.fromarray(f).quantize(palette=palette, dither=Image.Dither.NONE) for f in seq
-    ]
-    images[0].save(
-        path, save_all=True, append_images=images[1:], duration=int(1000 / fps), loop=0,
-        optimize=True,
-    )

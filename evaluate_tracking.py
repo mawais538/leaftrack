@@ -30,16 +30,17 @@ import cv2
 
 from leaftrack.evaluation import load_split
 from leaftrack.segment import LeafSegmenter
-from leaftrack.track import track_sequence
 from leaftrack.track_metrics import TrackingCounts
 from leaftrack.tracking_eval import (
     Method,
     SequenceRun,
     TrackerConfig,
-    bytetrack_sequence,
+    bytetrack_method,
+    bytetrack_tracks,
     config_grid,
     filmstrip,
     group_sequences,
+    measure_pipeline_latency,
     measure_tracker_latency,
     per_frame_ids,
     render_frames,
@@ -54,8 +55,8 @@ from leaftrack.tracking_eval import (
 )
 
 RENDER_SEQUENCES = {"multi_p00_c0": "multi-view", "rgbd_p01": "RGB-D"}
-MAIN = "**LeafTrack**"
-BYTETRACK = "ByteTrack (Ultralytics, box IoU + Kalman)"
+MAIN = "**ByteTrack (default)**"
+LEAFTRACKER = "LeafTracker (mask overlap)"
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -73,7 +74,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--conf", type=float, help="override the confidence threshold")
     p.add_argument("--val-split", default="val")
     p.add_argument("--split", default="test")
-    p.add_argument("--no-bytetrack", action="store_true", help="skip the ByteTrack baseline")
+    p.add_argument(
+        "--latency-frames", type=int, default=30, help="CPU frames timed (0 to skip)"
+    )
+    p.add_argument("--cpu-threads", type=int, default=2)
     p.add_argument("--name", default="yolo11n")
     p.add_argument("--out", type=Path, default=Path("outputs/track"))
     return p.parse_args(argv)
@@ -113,25 +117,22 @@ def main(argv: list[str] | None = None) -> int:
     out.mkdir(parents=True, exist_ok=True)
     segmenter = LeafSegmenter(args.weights, device=args.device, conf=conf, imgsz=args.imgsz)
 
-    baselines: dict[str, Method] = {}
-    if not args.no_bytetrack:
-        baselines[BYTETRACK] = lambda run: bytetrack_sequence(
-            args.weights, run.images, conf, args.device, args.imgsz
-        )
+    baselines: dict[str, Method] = {MAIN: bytetrack_method(segmenter)}
 
     print(f"Selecting tracker settings on '{args.val_split}' (conf {conf})")
     val, val_baselines = sweep(segmenter, args.data, args.val_split, conf, baselines)
     val_scores = {c: total({"all": n}) for c, n in val.items()}
     best = select_config(val_scores)
     print(f"  selected {best.label()}: val IDF1 {val_scores[best].idf1:.3f}")
-    val_idf1 = {MAIN: val_scores[best].idf1} | {
+    val_idf1 = {LEAFTRACKER: val_scores[best].idf1} | {
         m: total({"all": c}).idf1 for m, c in val_baselines.items()
     }
 
-    methods: dict[str, Method] = {"Per-frame IDs (no tracking)": per_frame_ids, **baselines}
-    methods["LeafTrack without track memory"] = tracker_method(replace(best, max_missed=0))
-    methods[MAIN] = tracker_method(best)
-    methods["LeafTrack on ground-truth masks"] = tracker_method(best, oracle=True)
+    methods: dict[str, Method] = {"Per-frame IDs (no tracking)": per_frame_ids}
+    methods["LeafTracker without track memory"] = tracker_method(replace(best, max_missed=0))
+    methods[LEAFTRACKER] = tracker_method(best)
+    methods.update(baselines)
+    methods["LeafTracker on ground-truth masks"] = tracker_method(best, oracle=True)
 
     print(f"Scoring '{args.split}'")
     per_method: dict[str, dict[str, TrackingCounts]] = defaultdict(dict)
@@ -160,10 +161,17 @@ def main(argv: list[str] | None = None) -> int:
         "sequences": len(per_seq),
         "frames": summary[main_name]["frames"],
         "gt_leaves": summary[main_name]["gt_leaves"],
+        "default_tracker": MAIN.strip("*"),
         "tracker_ms_per_frame": round(sorted(latencies)[len(latencies) // 2], 2),
         "methods": summary,
         "per_sequence": per_seq,
     }
+    if args.latency_frames and kept:
+        images = next(iter(kept.values())).images[-args.latency_frames :]
+        report["cpu_latency"] = measure_pipeline_latency(
+            args.weights, images, conf, args.imgsz, args.cpu_threads
+        )
+        print(f"  CPU latency: {report['cpu_latency']}")
     (out / "metrics.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     (out / "results.md").write_text(tracking_markdown(report), encoding="utf-8")
     with open(out / "per_sequence.csv", "w", newline="", encoding="utf-8") as f:
@@ -176,7 +184,7 @@ def main(argv: list[str] | None = None) -> int:
     if kept:
         keys = [k for k in RENDER_SEQUENCES if k in kept]
         runs = [kept[k] for k in keys]
-        tracks = [track_sequence(r.detections, best.build()) for r in runs]
+        tracks = [bytetrack_tracks(segmenter, r.images) for r in runs]
         frames = render_frames(runs, tracks, [RENDER_SEQUENCES[k] for k in keys], cell=300)
         save_gif(frames, out / "tracking.gif", fps=6)
         n = len(runs[0].rows)

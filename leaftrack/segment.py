@@ -138,7 +138,8 @@ class LeafSegmenter:
         weights: local ``.pt`` path (use :meth:`from_hub` for the Hub).
         device: ``"cpu"``, ``"0"`` (first GPU), etc.
         conf: minimum detection confidence.
-        iou: NMS IoU threshold.
+        iou: NMS IoU threshold. 0.5 (the Ultralytics default) scored best on
+            the validation plants for leaf metrics and tracking.
         imgsz: inference size; smaller is faster on CPU.
         max_det: maximum leaves per image.
         drop_neighbors: remove leaves of adjacent plants cut off by the image
@@ -150,7 +151,7 @@ class LeafSegmenter:
         weights: str | Path,
         device: str = "cpu",
         conf: float = 0.25,
-        iou: float = 0.7,
+        iou: float = 0.5,
         imgsz: int = 640,
         max_det: int = 50,
         drop_neighbors: bool = True,

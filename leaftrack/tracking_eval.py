@@ -21,13 +21,15 @@ from typing import Any
 import numpy as np
 from PIL import Image
 
+from leaftrack.bytetrack import ByteTrackLeafTracker
 from leaftrack.datasets.komatsuna import decode_label
 from leaftrack.evaluation import load_image
-from leaftrack.segment import LeafInstance, LeafSegmenter, drop_neighbor_leaves, to_instances
+from leaftrack.segment import LeafInstance, LeafSegmenter
 from leaftrack.track import LeafTracker, TrackedLeaf, track_sequence
 from leaftrack.track_metrics import Frame, TrackingCounts, TrackingSummary, evaluate_sequence
 
 Row = dict[str, str]
+Method = Callable[["SequenceRun"], list[Frame]]
 
 
 @dataclass(frozen=True)
@@ -88,43 +90,46 @@ def gt_instances(frame: Frame) -> list[LeafInstance]:
     return out
 
 
-def bytetrack_sequence(
-    weights: str, images: Sequence[np.ndarray], conf: float, device: str, imgsz: int
-) -> list[Frame]:
-    """Ultralytics ByteTrack baseline (box IoU + Kalman filter), same post-processing.
+def bytetrack_tracks(
+    segmenter: LeafSegmenter, images: Sequence[np.ndarray]
+) -> list[list[TrackedLeaf]]:
+    """Track one sequence with the default :class:`ByteTrackLeafTracker`."""
+    tracker = ByteTrackLeafTracker(segmenter)
+    return [tracker.update(image) for image in images]
 
-    A fresh model per sequence guarantees the tracker state starts empty.
-    """
-    from ultralytics import YOLO
 
-    model = YOLO(weights, task="segment")
-    frames: list[Frame] = []
-    for rgb in images:
-        r = model.track(
-            np.ascontiguousarray(rgb[..., ::-1]),
-            persist=True,
-            tracker="bytetrack.yaml",
-            conf=0.1,  # ByteTrack uses low-score boxes in its second association
-            imgsz=imgsz,
-            device=device,
-            retina_masks=True,
-            verbose=False,
-        )[0]
-        if r.masks is None or r.boxes.id is None:
-            frames.append({})
-            continue
-        ids = r.boxes.id.int().cpu().numpy()
-        masks, confs = r.masks.data.cpu().numpy(), r.boxes.conf.cpu().numpy()
-        boxes = r.boxes.xyxy.cpu().numpy()
-        track_of: dict[int, int] = {}
-        insts = []
-        for k in range(len(ids)):
-            inst = to_instances(masks[k : k + 1], confs[k : k + 1], boxes[k : k + 1])
-            if inst and inst[0].confidence >= conf:
-                track_of[id(inst[0])] = int(ids[k])
-                insts.append(inst[0])
-        frames.append({track_of[id(i)]: i.mask for i in drop_neighbor_leaves(insts)})
-    return frames
+def bytetrack_method(segmenter: LeafSegmenter) -> Method:
+    """ByteTrack as an evaluation method (it re-runs the segmenter on the images)."""
+    return lambda run: [to_frame(f) for f in bytetrack_tracks(segmenter, run.images)]
+
+
+def measure_pipeline_latency(
+    weights: str, images: Sequence[np.ndarray], conf: float, imgsz: int, threads: int = 2
+) -> dict[str, float]:
+    """Median CPU milliseconds per frame: segmentation alone vs segmentation + ByteTrack."""
+    import torch
+
+    previous = torch.get_num_threads()
+    torch.set_num_threads(threads)
+    try:
+        seg = LeafSegmenter(weights, device="cpu", conf=conf, imgsz=imgsz)
+        seg.predict(images[0])  # warm-up
+        t_seg, t_trk = [], []
+        tracker = ByteTrackLeafTracker(seg)
+        for image in images:
+            t0 = time.perf_counter()
+            seg.predict(image)
+            t_seg.append(time.perf_counter() - t0)
+            t0 = time.perf_counter()
+            tracker.update(image)
+            t_trk.append(time.perf_counter() - t0)
+    finally:
+        torch.set_num_threads(previous)
+    return {
+        "threads": threads,
+        "segment_ms": round(float(np.median(t_seg)) * 1000, 1),
+        "segment_and_bytetrack_ms": round(float(np.median(t_trk)) * 1000, 1),
+    }
 
 
 @dataclass
@@ -150,9 +155,6 @@ def segment_sequence(
     dets = [[i for i in segmenter.predict(img) if i.confidence >= conf] for img in images]
     gts = [load_gt_frame(r) for r in rows]
     return SequenceRun(key, list(rows), images, gts, dets)
-
-
-Method = Callable[[SequenceRun], list[Frame]]
 
 
 def run_methods(
@@ -223,8 +225,9 @@ def tracking_markdown(report: dict[str, Any]) -> str:
         f"## Leaf tracking, {report['split']} split",
         "",
         f"{report['sequences']} sequences, {report['frames']} frames, "
-        f"{report['gt_leaves']} ground-truth leaf tracks. Tracker settings selected on "
-        f"{report['selected_on']}: {report['config_label']}.",
+        f"{report['gt_leaves']} ground-truth leaf tracks. LeafTracker settings selected on "
+        f"{report['selected_on']}: {report['config_label']}. The default tracker "
+        f"({report['default_tracker']}) has the best validation IDF1.",
         "",
         "| Method | IDF1 ↑ | MOTA ↑ | ID switches ↓ | Mostly tracked ↑ | Val IDF1 |",
         "|---|---|---|---|---|---|",
@@ -238,10 +241,10 @@ def tracking_markdown(report: dict[str, Any]) -> str:
         )
     lines += [
         "",
-        f"Tracker CPU time: {report['tracker_ms_per_frame']:.1f} ms per frame (median), "
-        "on top of segmentation.",
+        f"LeafTracker association: {report['tracker_ms_per_frame']:.1f} ms per frame "
+        "(median, CPU).",
         "",
-        "### Per sequence (LeafTrack, predicted masks)",
+        f"### Per sequence ({report['default_tracker']}, predicted masks)",
         "",
         "| Sequence | Frames | Leaves | IDF1 | MOTA | ID switches |",
         "|---|---|---|---|---|---|",

@@ -104,7 +104,8 @@ def main(argv: list[str] | None = None) -> int:
     else:
         chosen, selected_on = PostProcess(args.conf, drop), "fixed by --conf"
     report["postprocess"] = {
-        "conf": chosen.conf, "drop_neighbors": chosen.drop_neighbors, "selected_on": selected_on,
+        "conf": chosen.conf, "drop_neighbors": chosen.drop_neighbors, "nms_iou": raw.iou,
+        "selected_on": selected_on,
     }  # fmt: skip
     print(f"  confidence threshold = {chosen.conf} ({selected_on})")
 

@@ -119,7 +119,7 @@ class LeafTracker:
     """
 
     def __init__(
-        self, iou_threshold: float = 0.3, max_distance: float = 0.0, max_missed: int = 5
+        self, iou_threshold: float = 0.3, max_distance: float = 0.0, max_missed: int = 10
     ) -> None:
         if not 0.0 <= iou_threshold <= 1.0:
             raise ValueError("iou_threshold must be in [0, 1]")

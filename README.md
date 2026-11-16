@@ -2,7 +2,7 @@
 
 **Leaf instance segmentation, tracking, and growth analytics for top-down plant time-lapse imagery.**
 
-> Segmentation, tracking and growth analytics are built and evaluated, with a Gradio demo and a REST API. The hosted demo link is coming soon.
+**[Try the live demo on Hugging Face](https://huggingface.co/spaces/Awais05/leaftrack)**: pick an example plant or upload your own time-lapse. Weights: [YOLO11n-seg](https://huggingface.co/Awais05/leaftrack-yolo11n-seg).
 
 ![Leaf tracking over 10 days on two held-out test plants](docs/assets/tracking_demo.gif)
 
@@ -157,7 +157,7 @@ The accuracy report is reproduced with `python evaluate_growth.py --device 0`.
 
 ## Demo and API
 
-**Gradio demo** (`app.py`): pick an example plant or upload the frames of one plant to get a tracking animation with stable leaf colors, growth charts, a per-leaf table and CSV downloads. A second tab segments and counts the leaves in a single image. It runs on CPU: the 60-frame example plant takes about 6 s on 2 CPU threads, and larger 480 px frames about 0.25 s each.
+**Gradio demo** (`app.py`, [live on Hugging Face Spaces](https://huggingface.co/spaces/Awais05/leaftrack)): pick an example plant or upload the frames of one plant to get a tracking animation with stable leaf colors, growth charts, a per-leaf table and CSV downloads. A second tab segments and counts the leaves in a single image. It runs on CPU: the 60-frame example plant takes about 6 s on 2 CPU threads, and larger 480 px frames about 0.25 s each.
 
 ```bash
 pip install -e ".[demo]"
@@ -180,7 +180,7 @@ curl -F "images=@day1.png" -F "images=@day2.png" -F "interval_hours=24" http://l
 | `POST /segment` | one image | leaves: polygon, box, area, confidence |
 | `POST /analyze` | frames of one plant (in order), `interval_hours`, `tracker` | leaves per frame with track IDs, plant traits per frame, per-leaf growth summary |
 
-Both load the published model from the Hugging Face Hub (or a local file via `LEAFTRACK_WEIGHTS`). `python deploy/deploy_space.py --repo <user>/leaftrack` publishes the demo as a Hugging Face Space (code only; the model and examples are fetched at runtime).
+Both load the published model from the Hugging Face Hub (or a local file via `LEAFTRACK_WEIGHTS`). `python deploy/deploy_space.py --repo <user>/leaftrack` publishes the demo as a Hugging Face Space (code only; the model and examples are fetched at runtime). It runs on ZeroGPU, which free accounts can use for up to two Gradio Spaces: only segmentation and tracking hold the GPU, and everything else runs on CPU.
 
 ## Training
 

@@ -2,17 +2,69 @@
 
 **Leaf instance segmentation, tracking, and growth analytics for top-down plant time-lapse imagery.**
 
+[![CI](https://github.com/mawais538/leaftrack/actions/workflows/ci.yml/badge.svg)](https://github.com/mawais538/leaftrack/actions/workflows/ci.yml)
+[![Live demo](https://img.shields.io/badge/demo-Hugging%20Face%20Spaces-yellow)](https://huggingface.co/spaces/Awais05/leaftrack)
+[![Model](https://img.shields.io/badge/model-YOLO11n--seg-blue)](https://huggingface.co/Awais05/leaftrack-yolo11n-seg)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 **[Try the live demo on Hugging Face](https://huggingface.co/spaces/Awais05/leaftrack)**: pick an example plant or upload your own time-lapse. Weights: [YOLO11n-seg](https://huggingface.co/Awais05/leaftrack-yolo11n-seg).
 
 ![Leaf tracking over 10 days on two held-out test plants](docs/assets/tracking_demo.gif)
 
 *Two test plants the model never saw in training, one image every 4 hours for 10 days. Each leaf keeps its color and number for as long as it is visible. Left: multi-view rig; right: RGB-D rig.*
 
+## Highlights
+
+All results are on plants the model never saw in training.
+
+| | |
+|---|---|
+| **Leaf segmentation** | mask mAP50 **0.987**, exact leaf count in **85%** of images |
+| **Leaf tracking** | IDF1 **0.968**, 6 ID switches in 240 frames |
+| **Growth analytics** | total leaf area within **1.7%** of ground truth, per-leaf area within **2.6%** |
+| **Speed** | about **0.24 s** per image on 2 CPU threads |
+| **Delivered as** | live web demo, REST API, CLI, published weights, tested Python package |
+
 ## What it does
 
 1. **Segment** every leaf in a top-down plant image with a YOLO11-seg model.
 2. **Track** each leaf across a time-lapse sequence so it keeps a stable ID.
 3. **Analyze** growth: leaf count, per-leaf area, and growth rate over time.
+
+Typical users are plant science and phenotyping labs, greenhouse and vertical-farming monitoring, and breeding programs: anyone who needs per-leaf measurements from camera images over time.
+
+## Quickstart
+
+```bash
+git clone https://github.com/mawais538/leaftrack.git
+cd leaftrack
+pip install -e ".[train]"
+```
+
+```python
+from pathlib import Path
+
+import numpy as np
+from PIL import Image
+
+from leaftrack.pipeline import analyze_sequence
+from leaftrack.segment import LeafSegmenter
+
+paths = sorted(Path("plant_frames").glob("*.png"))  # time-lapse of one plant, in order
+frames = [np.asarray(Image.open(p).convert("RGB")) for p in paths]
+hours = [4.0 * i for i in range(len(frames))]       # one image every 4 hours
+
+segmenter = LeafSegmenter.from_hub("Awais05/leaftrack-yolo11n-seg", conf=0.30)
+result = analyze_sequence(frames, hours, segmenter)
+print(result.plant[["hours", "leaf_count", "total_area_px", "rgr_per_day"]])
+```
+
+Or from the command line: `python analyze_growth.py --images path/to/plant_frames --interval-hours 4`.
+
+## Tech stack
+
+Python, PyTorch, Ultralytics YOLO11 (instance segmentation), ByteTrack, OpenCV, NumPy, SciPy, pandas, matplotlib, Gradio, FastAPI, Hugging Face Hub and Spaces, pytest, Ruff, GitHub Actions.
 
 ## Project structure
 
@@ -47,7 +99,7 @@ Test split: 240 images of 2 held-out plants (one per capture rig).
 | **[YOLO11n-seg](https://huggingface.co/Awais05/leaftrack-yolo11n-seg)** (demo model) | 2.8 M | **0.987** | **0.825** | 0.930 | 0.970 | 0.15 | 85% | **241 ms** |
 | [YOLO11s-seg](https://huggingface.co/Awais05/leaftrack-yolo11s-seg) | 10.1 M | 0.965 | 0.806 | **0.934** | **0.971** | **0.15** | **87%** | 523 ms |
 
-\* Median per image at 640 px on 2 CPU threads, matching the free Hugging Face Spaces tier.
+\* Median per image at 640 px on 2 CPU threads, a typical small cloud instance.
 
 - **The nano model is the right choice for the demo.** It matches the small model within 0.004 SBD and is 2.2× faster on CPU.
 - **SBD / FBD / DiC** are the [CVPPP leaf segmentation](https://link.springer.com/article/10.1007/s00138-015-0737-3) metrics. SBD measures how well each leaf is segmented, FBD how well the plant is separated from the background, and |DiC| the error in leaf count.
@@ -214,14 +266,35 @@ leaves = segmenter.predict(rgb_image)  # list of LeafInstance: mask, box, confid
 
 `conf=0.30` is the threshold selected on the validation plants. Weights are published with `python -m leaftrack.hub` and never committed to git.
 
+## Limitations and next steps
+
+- **One dataset.** The models are trained and evaluated on KOMATSUNA (top-down, controlled lighting, small rosette plants). Other species, cameras or field conditions need fine-tuning on a few labelled images; the training pipeline supports this directly.
+- **Projected area.** Areas are what the camera sees, in pixels. Overlapping leaves hide each other, and physical units need a known pixel size (`--mm-per-px`).
+- **One plant per sequence.** Each time-lapse should show one plant; tray images should be cropped per plant first.
+- **Next steps:** multi-plant tray support, leaf-angle-robust area (depth from the RGB-D rig), and ONNX export for faster CPU inference.
+
 ## Development
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -e ".[dev]"
+pip install -e ".[dev,demo]"
+ruff check .
 pytest
 ```
+
+The test suite (136 tests) runs on every push via GitHub Actions. Tests that need trained weights or the dataset are skipped automatically when those are not present.
+
+## Acknowledgements
+
+- **KOMATSUNA dataset:** H. Uchiyama et al., "An Easy-to-Setup 3D Phenotyping Platform for KOMATSUNA Dataset", ICCV Workshops 2017. [Dataset page](http://limu.ait.kyushu-u.ac.jp/~agri/komatsuna/).
+- **YOLO11** by [Ultralytics](https://github.com/ultralytics/ultralytics).
+- **ByteTrack:** Y. Zhang et al., "ByteTrack: Multi-Object Tracking by Associating Every Detection Box", ECCV 2022.
+- **Leaf segmentation metrics (SBD, FBD, DiC):** H. Scharr et al., "Leaf segmentation in plant phenotyping: a collation study", Machine Vision and Applications, 2016.
+
+## Author
+
+**Muhammad Awais Maqsood**, Computer Vision / ML Engineer. [GitHub @mawais538](https://github.com/mawais538)
 
 ## License
 

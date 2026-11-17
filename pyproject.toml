@@ -26,6 +26,11 @@ dependencies = [
     "scipy>=1.11",
 ]
 
+[project.urls]
+Homepage = "https://github.com/mawais538/leaftrack"
+Demo = "https://huggingface.co/spaces/Awais05/leaftrack"
+Model = "https://huggingface.co/Awais05/leaftrack-yolo11n-seg"
+
 [project.optional-dependencies]
 train = ["ultralytics>=8.3", "huggingface_hub>=0.24", "truststore>=0.9", "lap>=0.5.12"]
 demo = ["gradio>=4.0", "fastapi>=0.110", "uvicorn>=0.29", "python-multipart>=0.0.9"]
